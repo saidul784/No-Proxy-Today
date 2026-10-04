@@ -44,6 +44,10 @@ const int MAX_BACKGROUNDS = 64;
 char gBgFiles[MAX_BACKGROUNDS][200];   // paths relative to the asset root
 int  gBgCount = 0;
 
+// Level 03 walks through its own folder of backdrops, Bg1 .. Bg15.
+char gBg3Files[MAX_BACKGROUNDS][200];
+int  gBg3Count = 0;
+
 // Compares two names the way a person reads them: a run of digits is compared
 // by its value, so bg_9 comes before bg_10 rather than after it.
 static int naturalCompare(const char *a, const char *b)
@@ -85,50 +89,62 @@ static bool bgHasImageExtension(const char *name)
 	       _stricmp(dot, ".bmp")  == 0;
 }
 
-void scanBackgrounds()
+// Scans any folder of backdrops into any list. Level 01 and Level 03 each have
+// their own folder and their own ordering, so the scan takes both as arguments
+// rather than being hard-wired to one global.
+void scanBackgroundFolder(const char *folder, char outFiles[][200], int *outCount,
+                          const char *label)
 {
 	char pattern[520];
-	assetPath(PATH_BG_FOLDER, pattern, sizeof(pattern));
+	assetPath(folder, pattern, sizeof(pattern));
 	strcat_s(pattern, sizeof(pattern), "*.*");
 
-	gBgCount = 0;
+	int count = 0;
 
 	WIN32_FIND_DATAA find;
 	HANDLE handle = FindFirstFileA(pattern, &find);
 
 	if (handle == INVALID_HANDLE_VALUE) {
 		printf("[bg] could not open \"%s\"\n", pattern);
+		*outCount = 0;
 		return;
 	}
 
 	do {
 		if (find.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
 		if (!bgHasImageExtension(find.cFileName)) continue;
-		if (gBgCount >= MAX_BACKGROUNDS) break;
+		if (count >= MAX_BACKGROUNDS) break;
 
-		sprintf_s(gBgFiles[gBgCount], sizeof(gBgFiles[0]), "%s%s",
-		          PATH_BG_FOLDER, find.cFileName);
-		gBgCount++;
+		sprintf_s(outFiles[count], 200, "%s%s", folder, find.cFileName);
+		count++;
 	} while (FindNextFileA(handle, &find));
 
 	FindClose(handle);
 
 	// Insertion sort by name. The list is tiny, and this keeps the ordering
 	// rule obvious rather than hidden behind qsort and a comparator.
-	for (int i = 1; i < gBgCount; i++) {
+	for (int i = 1; i < count; i++) {
 		char key[200];
-		strcpy_s(key, sizeof(key), gBgFiles[i]);
+		strcpy_s(key, 200, outFiles[i]);
 		int j = i - 1;
-		while (j >= 0 && naturalCompare(gBgFiles[j], key) > 0) {
-			strcpy_s(gBgFiles[j + 1], sizeof(gBgFiles[0]), gBgFiles[j]);
+		while (j >= 0 && naturalCompare(outFiles[j], key) > 0) {
+			strcpy_s(outFiles[j + 1], 200, outFiles[j]);
 			j--;
 		}
-		strcpy_s(gBgFiles[j + 1], sizeof(gBgFiles[0]), key);
+		strcpy_s(outFiles[j + 1], 200, key);
 	}
 
-	printf("[bg] found %d backdrop image%s:\n", gBgCount, gBgCount == 1 ? "" : "s");
-	for (int i = 0; i < gBgCount; i++)
-		printf("[bg]   %2d  %s\n", i + 1, gBgFiles[i]);
+	*outCount = count;
+
+	printf("[bg] %s: %d backdrop image%s\n", label, count, count == 1 ? "" : "s");
+	for (int i = 0; i < count; i++)
+		printf("[bg]   %2d  %s\n", i + 1, outFiles[i]);
+}
+
+// Level 01's street, kept as its own call so nothing that used it changes.
+void scanBackgrounds()
+{
+	scanBackgroundFolder(PATH_BG_FOLDER, gBgFiles, &gBgCount, "level 01");
 }
 
 #endif // BACKGROUNDSCAN_HPP

@@ -67,6 +67,9 @@ double spriteAspect(const Sprite &s)
 // --- menu ------------------------------------------------------------------
 unsigned int TEX_POSTER = 0;
 unsigned int TEX_LEVELMAP = 0;                 // campaign map background
+
+// The HUD banner, in three pieces: left cap, stretchable middle, right cap.
+Sprite SPR_HUD_L, SPR_HUD_M, SPR_HUD_R;
 int SZ_LEVELMAP_W = 0, SZ_LEVELMAP_H = 0;      // its true pixel size
 
 // --- level 01 --------------------------------------------------------------
@@ -110,6 +113,35 @@ Sprite SPR_L02B_LEADER;                     // dakatleader, the boss
 Sprite SPR_L02B_CHIDORI;                    // the bolt he throws at a dakat
 Sprite SPR_L02B_POWERFUL;                   // the boss-killer
 Sprite SPR_L02B_ENEMY_CHI;                  // what the boss throws back
+
+// --- level 03: Kunipara to AUST -------------------------------------------
+// Level 03 ships its OWN copies of the walk cycle and of the street traffic,
+// in its own folder, so it never depends on Level 01 having been entered.
+unsigned int TEX_L03_BG[MAX_BACKGROUNDS]         = { 0 };
+unsigned int TEX_L03_BG_LAST = 0;                // the AUST gate he arrives at
+int SZ_L03_BG_LAST_W = 0, SZ_L03_BG_LAST_H = 0;  // its true size: it is not 16:9
+unsigned int TEX_L03_CHAR[CHARACTER_FRAME_COUNT] = { 0 };
+unsigned int TEX_L03_RUN[L03_RUN_FRAME_COUNT]    = { 0 };
+
+Sprite SPR_L03_THROW;        // his throwing pose
+Sprite SPR_L03_ROCK;         // pickup icon AND the thing he throws
+Sprite SPR_L03_PROTEST;      // the michil
+Sprite SPR_L03_COCKTAIL;     // what the michil throws back
+Sprite SPR_L03_SHIELD;       // the portrait frame it guards behind
+Sprite SPR_L03_RAGGING;
+Sprite SPR_L03_STICK;        // pickup icon AND projectile
+Sprite SPR_L03_EVETEASE;
+Sprite SPR_L03_EVE_RUSHER;   // the one who breaks off and charges
+Sprite SPR_L03_BEG;
+Sprite SPR_L03_SLAP1, SPR_L03_SLAP2;
+Sprite SPR_L03_FLAME;
+Sprite SPR_L03_COIN;         // scoring, through the shared collectCoin()
+
+Sprite SPR_L03_JAM[6];       // bus, car01, car02, car03, cng, rickshaw
+
+Sprite SPR_L03_BIKE_COMING, SPR_L03_BIKE_GOING;
+Sprite SPR_L03_CAR_COMING,  SPR_L03_CAR_GOING;
+Sprite SPR_L03_RICK_COMING, SPR_L03_RICK_GOING;
 
 // ---------------------------------------------------------------------------
 //  Upload
@@ -174,6 +206,65 @@ static bool pixelIsBackground(const unsigned char *p, int cut)
 // subject -- a dog's coat, the gleam on a coin -- is not reachable from the
 // edge, so it survives. This is also what kills the grey/white checkerboard
 // some of these files have baked into them where transparency used to be.
+// The mirror image of pixelIsBackground, for artwork that sits on BLACK
+// rather than on white. hud_frame.png is a gold banner on a black field: no
+// brightness cut can lift that off, because the thing to remove is the dark
+// part, so the test is inverted.
+static bool pixelIsDark(const unsigned char *p, int cut)
+{
+	int r = p[0], g = p[1], b = p[2];
+	int hi = r > g ? (r > b ? r : b) : (g > b ? g : b);
+	return hi <= cut;
+}
+
+// Clears every near-BLACK pixel connected to the border. Dark detail inside
+// the subject -- the shadowed inner edge of the banner, the recess behind the
+// bar -- is not reachable from outside, so it survives.
+static void floodClearDark(unsigned char *px, int w, int h, int cut)
+{
+	int total = w * h;
+	unsigned char *seen = (unsigned char *)calloc(total, 1);
+	int *stack = (int *)malloc(sizeof(int) * total);
+	if (seen == 0 || stack == 0) { free(seen); free(stack); return; }
+
+	int top = 0;
+
+	for (int x = 0; x < w; x++) {
+		int a = x, b = (h - 1) * w + x;
+		if (!seen[a] && pixelIsDark(px + a * 4, cut)) { seen[a] = 1; stack[top++] = a; }
+		if (!seen[b] && pixelIsDark(px + b * 4, cut)) { seen[b] = 1; stack[top++] = b; }
+	}
+	for (int y = 0; y < h; y++) {
+		int a = y * w, b = y * w + (w - 1);
+		if (!seen[a] && pixelIsDark(px + a * 4, cut)) { seen[a] = 1; stack[top++] = a; }
+		if (!seen[b] && pixelIsDark(px + b * 4, cut)) { seen[b] = 1; stack[top++] = b; }
+	}
+
+	while (top > 0) {
+		int id = stack[--top];
+		int x = id % w, y = id / w;
+		px[id * 4 + 3] = 0;
+
+		int nb[4];
+		int n = 0;
+		if (x > 0)     nb[n++] = id - 1;
+		if (x < w - 1) nb[n++] = id + 1;
+		if (y > 0)     nb[n++] = id - w;
+		if (y < h - 1) nb[n++] = id + w;
+
+		for (int i = 0; i < n; i++) {
+			int j = nb[i];
+			if (seen[j]) continue;
+			if (!pixelIsDark(px + j * 4, cut)) continue;
+			seen[j] = 1;
+			stack[top++] = j;
+		}
+	}
+
+	free(seen);
+	free(stack);
+}
+
 static void floodClearBackground(unsigned char *px, int w, int h, int cut)
 {
 	int total = w * h;
@@ -373,6 +464,45 @@ unsigned int loadTexture(const char *relativePath, int *outW = 0, int *outH = 0)
 //               them before anything else looks at the pixels.
 //   divisor     average down by this factor before the cut, for files far
 //               larger than they will ever be drawn.
+// Like loadSpriteEx, but for artwork on a BLACK field, and with the crop
+// rectangle still available so one banner can be sliced into its two ornate
+// end caps and its stretchable middle.
+//
+// No cropToContent here: a slice has to keep the exact rectangle it was cut
+// to, or the three pieces stop lining up with each other when they are drawn
+// back edge to edge.
+Sprite loadSpriteDarkEx(const char *relativePath, int darkCut,
+                        int subX, int subY, int subW, int subH)
+{
+	Sprite sprite = emptySprite();
+
+	char full[520];
+	assetPath(relativePath, full, sizeof(full));
+
+	int w = 0, h = 0, channels = 0;
+	unsigned char *pixels = stbi_load(full, &w, &h, &channels, 4);
+
+	if (pixels == 0) {
+		printf("[assets] FAILED: %s\n", full);
+		printf("[assets]   stb_image says: %s\n", stbi_failure_reason());
+		return sprite;
+	}
+
+	if (subW > 0 && subH > 0)
+		cropToRect(pixels, w, h, &w, &h, subX, subY, subW, subH);
+
+	floodClearDark(pixels, w, h, darkCut);
+	bleedEdges(pixels, w, h, 2);
+
+	sprite.tex = uploadTexture(pixels, w, h);
+	sprite.w = w;
+	sprite.h = h;
+	stbi_image_free(pixels);
+
+	printf("[assets] dark cut %-26s %4d x %-4d (cut %d)\n", relativePath, w, h, darkCut);
+	return sprite;
+}
+
 Sprite loadSpriteEx(const char *relativePath, int cut, double cropBottom,
                     bool clearEnclosed, int subX, int subY, int subW, int subH,
                     int divisor)
@@ -520,6 +650,14 @@ void assetsLoadMenu()
 	// it immediately -- loading it on demand would stall that transition.
 	// Its real size is kept so the screen can fit it without distorting it.
 	TEX_LEVELMAP = loadTexture(PATH_LEVELMAP, &SZ_LEVELMAP_W, &SZ_LEVELMAP_H);
+
+	// Loaded with the menu so every screen can use it without a second load.
+	SPR_HUD_L = loadSpriteDarkEx(PATH_HUD_FRAME, HUD_FRAME_DARK_CUT,
+	                             HUD_FRAME_L_X, HUD_FRAME_Y, HUD_FRAME_CAP_W, HUD_FRAME_H);
+	SPR_HUD_M = loadSpriteDarkEx(PATH_HUD_FRAME, HUD_FRAME_DARK_CUT,
+	                             HUD_FRAME_M_X, HUD_FRAME_Y, HUD_FRAME_M_W, HUD_FRAME_H);
+	SPR_HUD_R = loadSpriteDarkEx(PATH_HUD_FRAME, HUD_FRAME_DARK_CUT,
+	                             HUD_FRAME_R_X, HUD_FRAME_Y, HUD_FRAME_CAP_W, HUD_FRAME_H);
 }
 
 // The six walk frames used to belong to Level 01 alone. The second half of
@@ -760,6 +898,111 @@ void assetsLoadLevel02(LoadProgressFn progress)
 	SPR_L02B_ENEMY_CHI = loadSpriteRaw(PATH_L02B_ENEMY_CHI);  if (progress) progress("enemy chidori",    ++done, total);
 
 	printf("[assets] level 02 ready\n");
+}
+
+// ---------------------------------------------------------------------------
+//  Level 03
+//
+//  Cut thresholds, taken from the corner samples rather than chosen by eye:
+//
+//    rock.png        a 4-bit indexed PNG on a white/grey chequerboard, like the
+//                    Level 01 coin: deep bite plus the enclosed pass.
+//    protest.png     already transparent -- a trim only.
+//    ragging.jpg     plain white, and the artwork is strongly coloured.
+//    stick.jpg       an off-white field sampling 245-252, so the bite has to
+//                    reach below that without eating the pale stick.
+//    eveteasing.jpg  a cool off-white around 238-251.
+//    beg.png         24-bit despite the extension: a white field needing a cut.
+//    boy_0*.png      already transparent.
+//    flame.png       already transparent.
+//    bus.png         already transparent; the other five jam vehicles are flat
+//                    white or grey photo fields.
+// ---------------------------------------------------------------------------
+bool assetsLevel03Loaded()
+{
+	return SPR_L03_ROCK.tex != 0;
+}
+
+void assetsLoadLevel03(LoadProgressFn progress)
+{
+	if (assetsLevel03Loaded()) return;
+
+	const int total = 28 + CHARACTER_FRAME_COUNT + L03_RUN_FRAME_COUNT + gBg3Count;
+	int done = 0;
+
+	printf("[assets] --- loading level 03 ---\n");
+
+	for (int i = 0; i < CHARACTER_FRAME_COUNT; i++) {
+		char rel[160];
+		sprintf_s(rel, sizeof(rel), PATH_L03_CHAR_FMT, i + 1);
+		TEX_L03_CHAR[i] = loadTexture(rel);
+		if (progress) progress("the walk", ++done, total);
+	}
+
+	for (int i = 0; i < L03_RUN_FRAME_COUNT; i++) {
+		char rel[160];
+		sprintf_s(rel, sizeof(rel), PATH_L03_RUN_FMT, i + 1);
+		TEX_L03_RUN[i] = loadTexture(rel);
+		if (progress) progress("the thief", ++done, total);
+	}
+
+	SPR_L03_THROW    = loadSprite(PATH_L03_THROW,    236, 0.0, false); if (progress) progress("the throw",   ++done, total);
+	SPR_L03_ROCK     = loadSprite(PATH_L03_ROCK,     200, 0.0, true);  if (progress) progress("the rock",    ++done, total);
+	SPR_L03_PROTEST  = loadSpriteAlpha(PATH_L03_PROTEST);              if (progress) progress("the michil",  ++done, total);
+	// cut 190: the studio backdrop bottoms out at 198 while the brightest
+	// glass highlight is 152, so the bottle survives and the grey does not.
+	SPR_L03_COCKTAIL = loadSprite(PATH_L03_COCKTAIL, 190, 0.0, false); if (progress) progress("the cocktail", ++done, total);
+	// cut 246 + clearEnclosed: the frame is white OUTSIDE and IN, and the
+	// enclosed pass is what opens the middle so the crowd shows through.
+	// The portraits run 124-161, far below the cut, so they are untouched.
+	SPR_L03_SHIELD   = loadSprite(PATH_L03_SHIELD,   246, 0.0, true);  if (progress) progress("the shield",   ++done, total);
+	SPR_L03_RAGGING  = loadSprite(PATH_L03_RAGGING,  205, 0.0, true); if (progress) progress("ragging",     ++done, total);
+	SPR_L03_STICK    = loadSprite(PATH_L03_STICK,    236, 0.0, true);  if (progress) progress("the stick",   ++done, total);
+	SPR_L03_EVETEASE = loadSprite(PATH_L03_EVETEASE, 230, 0.0, false); if (progress) progress("eve-teasers", ++done, total);
+	// cut 240: the page behind him is pure 253-255 white while every part of
+	// him is either dark or strongly coloured. His white sandals and the
+	// cream fishnet sleeves are enclosed by his own outline, so the border
+	// flood cannot reach them and they survive -- hence no enclosed pass.
+	SPR_L03_EVE_RUSHER = loadSprite(PATH_L03_EVE_RUSHER, 240, 0.0, false); if (progress) progress("the aggressor", ++done, total);
+	SPR_L03_BEG      = loadSprite(PATH_L03_BEG,      236, 0.0, false); if (progress) progress("the plea",    ++done, total);
+	SPR_L03_SLAP1    = loadSpriteAlpha(PATH_L03_SLAP1);                if (progress) progress("the slap",    ++done, total);
+	SPR_L03_SLAP2    = loadSpriteAlpha(PATH_L03_SLAP2);                if (progress) progress("the slap",    ++done, total);
+	SPR_L03_FLAME    = loadSpriteAlpha(PATH_L03_FLAME);                if (progress) progress("fire",        ++done, total);
+	SPR_L03_COIN     = loadSprite(PATH_L03_COIN,     200, 0.0, true);  if (progress) progress("coins",       ++done, total);
+
+	SPR_L03_JAM[0] = loadSpriteAlpha(PATH_L03_BUS);                    if (progress) progress("the jam", ++done, total);
+	SPR_L03_JAM[1] = loadSprite(PATH_L03_CAR01,    240, 0.0, true);    if (progress) progress("the jam", ++done, total);
+	SPR_L03_JAM[2] = loadSprite(PATH_L03_CAR02,    200, 0.0, true);    if (progress) progress("the jam", ++done, total);
+	SPR_L03_JAM[3] = loadSprite(PATH_L03_CAR03,    200, 0.0, true);    if (progress) progress("the jam", ++done, total);
+	SPR_L03_JAM[4] = loadSprite(PATH_L03_CNG,      240, 0.0, true);    if (progress) progress("the jam", ++done, total);
+	SPR_L03_JAM[5] = loadSprite(PATH_L03_RICKSHAW, 226, 0.0, true);    if (progress) progress("the jam", ++done, total);
+
+	SPR_L03_BIKE_COMING = loadSprite(PATH_L03_BIKE_COMING, 228, 0.0,  false); if (progress) progress("street traffic", ++done, total);
+	SPR_L03_BIKE_GOING  = loadSprite(PATH_L03_BIKE_GOING,  228, 0.0,  false); if (progress) progress("street traffic", ++done, total);
+	SPR_L03_CAR_COMING  = loadSprite(PATH_L03_CAR_COMING,  200, 0.0,  true);  if (progress) progress("street traffic", ++done, total);
+	SPR_L03_CAR_GOING   = loadSprite(PATH_L03_CAR_GOING,   200, 0.0,  false); if (progress) progress("street traffic", ++done, total);
+	SPR_L03_RICK_COMING = loadSprite(PATH_L03_RICK_COMING, 188, 0.10, false); if (progress) progress("street traffic", ++done, total);
+	SPR_L03_RICK_GOING  = loadSprite(PATH_L03_RICK_GOING,  228, 0.0,  false); if (progress) progress("street traffic", ++done, total);
+
+	// The fifteen backdrops he walks through, at full resolution: each one
+	// fills the window, so any softening would show.
+	for (int i = 0; i < gBg3Count; i++) {
+		int w = 0, h = 0;
+		TEX_L03_BG[i] = loadTextureScaled(gBg3Files[i], 1, &w, &h);
+		printf("[assets] backdrop %2d  %-34s %4d x %-4d\n", i + 1, gBg3Files[i], w, h);
+		if (progress) progress("the road", ++done, total);
+	}
+
+	// The gate at the end of the road. Kept out of the backround folder on
+	// purpose: the scrolling street must never reach it, because arriving
+	// there is what ends the level.
+	TEX_L03_BG_LAST = loadTexture(PATH_L03_BG_LAST,
+	                              &SZ_L03_BG_LAST_W, &SZ_L03_BG_LAST_H);
+	printf("[assets] the gate    %-34s %4d x %-4d\n",
+	       PATH_L03_BG_LAST, SZ_L03_BG_LAST_W, SZ_L03_BG_LAST_H);
+	if (progress) progress("AUST", ++done, total);
+
+	printf("[assets] level 03 ready\n");
 }
 
 #endif // ASSETS_HPP

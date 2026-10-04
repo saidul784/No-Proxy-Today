@@ -12,8 +12,8 @@
 //
 //  So the images live one level ABOVE the project dir, while Audios\ lives
 //  INSIDE it. Visual Studio runs the exe with cwd = project dir, but a
-//  double-clicked exe runs with cwd = Debug. Rather than hard-coding "..\",
-//  we probe for a sentinel file at start-up and remember what worked.
+//  double-clicked exe runs with cwd = Debug. Rather than hard-coding a "..\"
+//  prefix, we probe for a sentinel file at start-up and remember what worked.
 //
 #ifndef PATHS_HPP
 #define PATHS_HPP

@@ -164,6 +164,65 @@ void audioEnsureLooping(const char *alias)
 	}
 }
 
+// True while the clip is actually sounding. Used to drive a conversation: the
+// next line starts when the previous one has finished, not on a guessed timer.
+bool audioIsPlaying(const char *alias)
+{
+	char cmd[128];
+	char mode[64] = "";
+
+	sprintf_s(cmd, sizeof(cmd), "status %s mode", alias);
+	if (mciSendStringA(cmd, mode, sizeof(mode), NULL) != 0) return false;
+
+	return strcmp(mode, "playing") == 0;
+}
+
+// Plays ONE file through a reusable alias: closes whatever that alias held,
+// opens this file, plays it once.
+//
+// Level 03's conversation is twenty-two separate clips. Opening twenty-two
+// permanent MCI aliases would blow past AUDIO_MAX_ALIASES and leave nothing for
+// the rest of the game, so the whole conversation shares a single alias and
+// swaps the file behind it line by line.
+void audioPlayFileOnce(const char *alias, const char *fullPath, int mix)
+{
+	char cmd[600];
+
+	MCIERROR err;
+
+	sprintf_s(cmd, sizeof(cmd), "close %s", alias);
+	err = mciSendStringA(cmd, NULL, 0, NULL);
+	if (err != 0) {
+		char msg[256] = "";
+		mciGetErrorStringA(err, msg, sizeof(msg));
+		printf("[audio] close %s -> %s\n", alias, msg);
+	}
+
+	sprintf_s(cmd, sizeof(cmd), "open \"%s\" type mpegvideo alias %s", fullPath, alias);
+	err = mciSendStringA(cmd, NULL, 0, NULL);
+	if (err != 0) {
+		char msg[256] = "";
+		mciGetErrorStringA(err, msg, sizeof(msg));
+		printf("[audio] open(mpegvideo) failed: %s\n", msg);
+
+		sprintf_s(cmd, sizeof(cmd), "open \"%s\" alias %s", fullPath, alias);
+		err = mciSendStringA(cmd, NULL, 0, NULL);
+		if (err != 0) {
+			mciGetErrorStringA(err, msg, sizeof(msg));
+			printf("[audio] could not open %s: %s\n", fullPath, msg);
+			return;
+		}
+	}
+
+	if (mix > 0) {
+		sprintf_s(cmd, sizeof(cmd), "setaudio %s volume to %d", alias, mix);
+		mciSendStringA(cmd, NULL, 0, NULL);
+	}
+
+	sprintf_s(cmd, sizeof(cmd), "play %s from 0", alias);
+	mciSendStringA(cmd, NULL, 0, NULL);
+}
+
 void audioStop(const char *alias)
 {
 	char cmd[128];
