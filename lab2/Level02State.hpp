@@ -256,6 +256,7 @@ void level02GameOver(const char *reason)
 	gL02EndReason = reason;
 
 	level02AllCrocSoundsStop();
+	highScoreEndAttempt(gScore);
 	audioPlayOnce("losesnd");
 }
 
@@ -275,7 +276,12 @@ void level02Win()
 	// function returns immediately if the phase has already been set.
 	audioPlayOnce("winsnd2");
 
-	campaignMarkLevelComplete(2);
+	// Marks the level through campaignMarkLevelComplete(), banks the score
+	// and coins, and writes info.txt -- once. This function already returns
+	// early if the phase is set, so it cannot be reached twice anyway.
+	saveLevelComplete(2);
+	highScoreEndAttempt(gScore);
+
 	printf("[level02] LEVEL 02 COMPLETE -- level 03 unlocked\n");
 }
 

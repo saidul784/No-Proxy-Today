@@ -135,8 +135,15 @@ static void level02LoadProgress(const char *stage, int done, int total)
 // ---------------------------------------------------------------------------
 static void level02Start()
 {
+	// Restarting banks whatever the previous attempt earned, before the reset
+	// below zeroes the score.
+	highScoreEndAttempt(gScore);
+
 	level02ResetState();
 	l02ResetEntities();
+
+	// A fresh attempt, so a fresh result may be banked when it is won.
+	saveNoteLevelStarted(2);
 
 	gL02Throw = THROW_IDLE;
 	gL02ThrowTimer = 0.0;
@@ -154,6 +161,8 @@ static void level02Start()
 	// One rain loop for the whole level. It is started here and never stopped
 	// between stages -- only leaving the level silences it.
 	level02RainStart();
+
+	highScoreBeginAttempt(2);
 }
 
 void level02Enter()

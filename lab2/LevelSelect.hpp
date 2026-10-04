@@ -57,7 +57,7 @@ struct CampaignProgress {
 static CampaignProgress gCampaign = {
 	true,   // level1Unlocked   -- Mohanogar Housing Society, open from the start
 	true,   // level2Unlocked   -- Hateerjheel, open from the start
-	false,  // level3Unlocked   -- Kunipara to AUST, locked until level 2 is done
+	true,   // level3Unlocked   -- Kunipara to AUST, open from the start too
 
 	false,  // level1Completed
 	false,  // level2Completed
@@ -406,18 +406,15 @@ void levelSelectMouse(int button, int state, int mx, int my)
 			return;
 		}
 
-		if (i == 0) {
-			setState(STATE_LEVEL01);   // the existing Level 01, untouched
-		} else if (i == 1) {
-			// Part one of Level 02 -- the river crossing. It does NOT call
-			// campaignMarkLevelComplete(2) yet, because part one is not the
-			// whole level: Level 03 stays locked until the rest of Level 02
-			// exists and something marks it beaten.
-			setState(STATE_LEVEL02);
-		} else {
-			// Unlocked Level 03 has no gameplay yet either.
-			levelSelectToast("LEVEL 03 NOT BUILT YET", "KUNIPARA TO AUST is coming later");
-		}
+		// The level is PENDING from here. The name screen is what actually
+		// starts it -- it calls the same setState(STATE_LEVELnn) this used to
+		// -- and only once a name has been confirmed. Backing out of that
+		// screen comes straight back here having started nothing at all: no
+		// entry function, no timer, no attempt, no record.
+		//
+		// The unlock rules above are unchanged and still decide what is
+		// reachable; this only moves WHEN the level begins.
+		nameEntryBegin(i);
 		return;
 	}
 

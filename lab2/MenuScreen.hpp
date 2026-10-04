@@ -35,6 +35,7 @@
 #endif
 enum MenuItem {
 	MENU_NEW_GAME = 0,
+	MENU_SCORES,
 	MENU_KEYS,
 	MENU_ABOUT,
 	MENU_EXIT
@@ -42,6 +43,7 @@ enum MenuItem {
 
 static const char *kMenuLabels[MENU_ITEM_COUNT] = {
 	"NEW GAME",
+	"HIGHEST SCORES",
 	"KEYS",
 	"ABOUT THE GAME",
 	"EXIT"
@@ -65,6 +67,7 @@ static void menuActivate(int index)
 {
 	switch (index) {
 	case MENU_NEW_GAME: setState(STATE_LEVEL_SELECT); break;   // was STATE_LEVEL01
+	case MENU_SCORES:   setState(STATE_SCORES);  break;
 	case MENU_KEYS:     setState(STATE_KEYS);    break;
 	case MENU_ABOUT:    setState(STATE_ABOUT);   break;
 	case MENU_EXIT:     quitGame();              break;
