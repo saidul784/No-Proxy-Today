@@ -30,7 +30,11 @@
 #include "KeysScreen.hpp"    // controls
 #include "AboutScreen.hpp"   // proposal summary
 #include "LevelState.hpp"    // health, lives, shield, clock, progress, rules
+#include "HighScores.hpp"   // per-level top-five leaderboards
+#include "NameEntry.hpp"    // who is playing, asked before a level starts
+#include "ScoresScreen.hpp" // the leaderboard screen
 #include "LevelSelect.hpp"   // campaign map (needs gLevel01Cleared)
+#include "SaveSystem.hpp"    // info.txt: progress saved between runs
 #include "Entities.hpp"      // the one obstacle, coins and power-ups
 #include "Player.hpp"        // the running character
 #include "HUD.hpp"           // score, health, lives, shield, clock, route
@@ -39,7 +43,12 @@
 #include "Level02Entities.hpp" // level 02: boat, ball, crocodiles, chidori
 #include "Level02Deck.hpp"     // level 02: pirate ship, demons, Demon Lord
 #include "Level02HUD.hpp"     // level 02: its own read-outs
-#include "Level02.hpp"        // the river crossing (part 1)
+#include "Level02.hpp"        // the river crossing and the pirate ship
+#include "Level03State.hpp"    // level 03: stage machine, health, rules
+#include "Level03Entities.hpp" // level 03: walker, street traffic, throwing
+#include "Level03Scenes.hpp"   // level 03: michil, ragging, eve, chor, the jam
+#include "Level03HUD.hpp"      // level 03: its own read-outs
+#include "Level03.hpp"         // Kunipara -> AUST
 
 // ---------------------------------------------------------------------------
 //  Screen dispatch
@@ -53,8 +62,11 @@ void iDraw()
 	case STATE_KEYS:    keysDraw();    break;
 	case STATE_ABOUT:   aboutDraw();   break;
 	case STATE_LEVEL_SELECT: levelSelectDraw(); break;
+	case STATE_NAME_ENTRY:   nameEntryDraw();   break;
+	case STATE_SCORES:       scoresDraw();      break;
 	case STATE_LEVEL01: level01Draw(); break;
 	case STATE_LEVEL02: level02Draw(); break;
+	case STATE_LEVEL03: level03Draw(); break;
 	}
 }
 
@@ -69,8 +81,11 @@ void fixedUpdate()
 	case STATE_KEYS:    keysUpdate();    break;
 	case STATE_ABOUT:   aboutUpdate();   break;
 	case STATE_LEVEL_SELECT: levelSelectUpdate(); break;
+	case STATE_NAME_ENTRY:   nameEntryUpdate();   break;
+	case STATE_SCORES:       scoresUpdate();      break;
 	case STATE_LEVEL01: level01Update(); break;
 	case STATE_LEVEL02: level02Update(); break;
+	case STATE_LEVEL03: level03Update(); break;
 	}
 
 	inputEndFrame();   // must stay last -- it snapshots this frame's key state
@@ -83,8 +98,11 @@ void iMouse(int button, int state, int mx, int my)
 	case STATE_KEYS:    keysMouse(button, state, mx, my);    break;
 	case STATE_ABOUT:   aboutMouse(button, state, mx, my);   break;
 	case STATE_LEVEL_SELECT: levelSelectMouse(button, state, mx, my); break;
+	case STATE_NAME_ENTRY:   nameEntryMouse(button, state, mx, my);   break;
+	case STATE_SCORES:       scoresMouse(button, state, mx, my);      break;
 	case STATE_LEVEL01: level01Mouse(button, state, mx, my); break;
 	case STATE_LEVEL02: level02Mouse(button, state, mx, my); break;
+	case STATE_LEVEL03: level03Mouse(button, state, mx, my); break;
 	}
 }
 
@@ -94,6 +112,8 @@ void iPassiveMouseMove(int mx, int my)
 		menuPassiveMouseMove(mx, my);
 	else if (gState == STATE_LEVEL_SELECT)
 		levelSelectPassiveMouseMove(mx, my);
+	else if (gState == STATE_SCORES)
+		scoresPassiveMouseMove(mx, my);
 }
 
 void iMouseMove(int mx, int my)
@@ -130,6 +150,14 @@ static void menuAudioStop()
 // ---------------------------------------------------------------------------
 void setState(GameStateId next)
 {
+	// Walking out of a level -- ESC to the map, ENTER off the end screen, any
+	// route at all -- ends the attempt and banks what it earned. Winning and
+	// dying already closed it, and closing twice does nothing, so this catches
+	// the ways out that nothing else covers without ever double-recording.
+	if ((gState == STATE_LEVEL01 || gState == STATE_LEVEL02 || gState == STATE_LEVEL03) &&
+	    next != gState)
+		highScoreEndAttempt(gScore);
+
 	gState = next;
 
 	// A key still held down during the change must not immediately fire on the
@@ -138,7 +166,7 @@ void setState(GameStateId next)
 
 	// The campaign map counts as part of the menu shell, so the intro
 	// narration keeps looping across it and only stops when a level starts.
-	if (next == STATE_LEVEL01 || next == STATE_LEVEL02)
+	if (next == STATE_LEVEL01 || next == STATE_LEVEL02 || next == STATE_LEVEL03)
 		menuAudioStop();
 	else
 		menuAudioStart();
@@ -148,14 +176,18 @@ void setState(GameStateId next)
 	case STATE_KEYS:    keysEnter();    break;
 	case STATE_ABOUT:   aboutEnter();   break;
 	case STATE_LEVEL_SELECT: levelSelectEnter(); break;
+	case STATE_NAME_ENTRY:   nameEntryEnter();   break;
+	case STATE_SCORES:       scoresEnter();      break;
 	case STATE_LEVEL01: level01Enter(); break;
 	case STATE_LEVEL02: level02Enter(); break;
+	case STATE_LEVEL03: level03Enter(); break;
 	}
 }
 
 void quitGame()
 {
 	printf("[game] closing\n");
+	highScoresSave();          // only writes if something actually changed
 	audioCloseAll();
 	exit(0);   // glutMainLoop() never returns, so there is no other way out
 }
@@ -183,11 +215,21 @@ int main()
 	// 1. work out where the assets are relative to the working directory
 	pathsInit();
 
+	// 1b. read info.txt back, so the campaign map opens showing whatever was
+	//     completed in an earlier session. It needs no window and no assets,
+	//     and a missing file is not an error -- it just means a fresh career.
+	loadGameInfo();
+
+	//     ...and the leaderboards, which live in their own file so a damaged
+	//     scoreboard can never cost anyone their unlocks.
+	highScoresLoad();
+
 	// 2. see which backdrop images the street is made of. This is a directory
 	//    scan, not a hard-coded list, so images can be added to or removed from
 	//    the folder without touching any code. It needs no GL context, so it
 	//    runs here and the level knows its length before loading starts.
 	scanBackgrounds();
+	scanBackgroundFolder(PATH_L03_BG_FOLDER, gBg3Files, &gBg3Count, "level 03");
 
 	// 3. audio can be opened before the window exists.
 	//
@@ -227,6 +269,12 @@ int main()
 	//    the dakatleader is down. The file is called "loose sound2" but it is
 	//    the WIN sting for this level.
 	assetPath(PATH_L02B_WIN_SONG, full, sizeof(full)); audioOpen("winsnd2", full);
+
+	//    Level 03: the march that chants while it is on screen, and the
+	//    thief's plea. The twenty-two conversation clips are NOT opened here
+	//    -- they share one alias that swaps files, see level03SpeakLine().
+	assetPath(PATH_L03_MICHIL_SFX, full, sizeof(full)); audioOpen("michil", full);
+	assetPath(PATH_L03_BEG_SFX, full, sizeof(full));    audioOpen("begsfx", full);
 	for (int c = 0; c < MAX_CROCODILES; c++) {
 		assetPath(PATH_L02_CROC_SFX, full, sizeof(full));
 		audioOpen(L02_CROC_ALIAS[c], full);
@@ -246,6 +294,8 @@ int main()
 	audioSetMix("rain",       MIX_RAIN);
 	audioSetMix("piratesong", MIX_PIRATE);
 	audioSetMix("winsnd2",    MIX_L02_WIN);
+	audioSetMix("michil",     MIX_MICHIL);
+	audioSetMix("begsfx",     MIX_BEG);
 	for (int c = 0; c < MAX_CROCODILES; c++)
 		audioSetMix(L02_CROC_ALIAS[c], MIX_CROC);
 
